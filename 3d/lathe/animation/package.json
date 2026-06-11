@@ -1,0 +1,17 @@
+{
+  "name": "lathe-animation",
+  "private": true,
+  "scripts": {
+    "render": "remotion render src/index.jsx Lathe out/lathe.mp4"
+  },
+  "dependencies": {
+    "@react-three/fiber": "^8.17.10",
+    "@remotion/cli": "^4.0.0",
+    "@remotion/three": "^4.0.0",
+    "@sparticuz/chromium": "^149.0.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "^4.0.0",
+    "three": "0.166.0"
+  }
+}
