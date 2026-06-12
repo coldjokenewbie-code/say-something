@@ -1,5 +1,0 @@
-{
-  "name": "Offline Markdown Editor",
-  "description": "A WYSIWYG Markdown editor that can open, edit, and save .md and .txt files offline.",
-  "requestFramePermissions": []
-}
