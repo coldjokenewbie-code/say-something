@@ -34,7 +34,8 @@ export const speechSupported = getCtor() !== null;
 export interface DictationCallbacks {
   /** Called with accumulated final text and the current interim (not yet final) text. */
   onUpdate(finalText: string, interimText: string): void;
-  onError(message: string): void;
+  /** `code` is the SpeechRecognition error code (e.g. 'network', 'not-allowed'). */
+  onError(message: string, code: string): void;
   /** Called when recognition fully stops (user stop or browser timeout). */
   onStop(): void;
 }
@@ -58,7 +59,7 @@ export class Dictation {
   start(lang: string, seedText: string): void {
     const Ctor = getCtor();
     if (!Ctor) {
-      this.cb.onError('這個瀏覽器不支援語音辨識,請改用 Chrome(Android/桌機)或 Safari(iPad/iPhone)。');
+      this.cb.onError('這個瀏覽器不支援語音辨識,請改用 Chrome(Android/桌機)或 Safari(iPad/iPhone)。', 'unsupported');
       return;
     }
     this.finalText = seedText ? seedText.replace(/\s*$/, '') + '\n' : '';
@@ -87,11 +88,12 @@ export class Dictation {
       if (code === 'no-speech' || code === 'aborted') return; // benign, onend handles restart
       if (code === 'not-allowed' || code === 'service-not-allowed') {
         this.userStopped = true;
-        this.cb.onError('麥克風權限被拒絕,請在瀏覽器設定允許使用麥克風。');
+        this.cb.onError('麥克風權限被拒絕,請在瀏覽器設定允許使用麥克風。', code);
       } else if (code === 'network') {
-        this.cb.onError('語音辨識需要網路連線。');
+        this.userStopped = true;
+        this.cb.onError('這個瀏覽器的即時語音辨識服務無法連線。', code);
       } else {
-        this.cb.onError(`語音辨識發生錯誤(${code})。`);
+        this.cb.onError(`語音辨識發生錯誤(${code})。`, code);
       }
     };
 

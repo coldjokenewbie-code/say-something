@@ -64,6 +64,73 @@ export const MODES: Mode[] = [
   },
 ];
 
+/** Recording-mode fallback: Gemini transcribes the audio and applies the same
+ *  rewrite instruction in one call. Claude has no audio input, so this path
+ *  always goes through Gemini (using the selected Gemini model, or Flash). */
+export interface RunAudioOptions {
+  modelId: string;
+  mode: Mode;
+  outputLang: string;
+  audio: Blob;
+  geminiKey: string;
+  /** Both callbacks receive the full accumulated text so far (replace, not append). */
+  onTranscript(text: string): void;
+  onResult(text: string): void;
+  signal: AbortSignal;
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    bin += String.fromCharCode(...buf.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+export async function runModelAudio(opts: RunAudioOptions): Promise<void> {
+  if (!opts.geminiKey) {
+    throw new Error('錄音模式由 Gemini 處理音訊(Claude API 不接受音訊),請先在設定填入 Gemini API key。');
+  }
+  const selected = modelById(opts.modelId);
+  const geminiModel = selected.provider === 'gemini' ? selected.id : 'gemini-2.5-flash';
+
+  const system = [
+    buildSystem(opts.mode, opts.outputLang),
+    '使用者提供的是一段語音錄音。請先把錄音內容聽寫成逐字稿,輸出逐字稿後換行輸出「---」一行,接著輸出依上述指示整理後的結果。',
+  ].join('\n');
+
+  const ai = new GoogleGenAI({ apiKey: opts.geminiKey });
+  const data = await blobToBase64(opts.audio);
+  const response = await ai.models.generateContentStream({
+    model: geminiModel,
+    contents: [
+      { inlineData: { mimeType: opts.audio.type.split(';')[0] || 'audio/webm', data } },
+      { text: '請處理這段錄音。' },
+    ],
+    config: { systemInstruction: system, abortSignal: opts.signal },
+  });
+
+  let full = '';
+  for await (const chunk of response) {
+    if (opts.signal.aborted) return;
+    if (!chunk.text) continue;
+    full += chunk.text;
+    const sep = full.search(/\n-{3,}\n?/);
+    if (sep === -1) {
+      opts.onTranscript(full);
+    } else {
+      opts.onTranscript(full.slice(0, sep).trim());
+      opts.onResult(full.slice(sep).replace(/^\n-{3,}\n?/, '').trim());
+    }
+  }
+  // Model ignored the --- format: treat everything as the result
+  if (full && full.search(/\n-{3,}\n?/) === -1) {
+    opts.onResult(full.trim());
+  }
+}
+
 function buildSystem(mode: Mode, outputLang: string): string {
   const lang =
     outputLang === 'same'

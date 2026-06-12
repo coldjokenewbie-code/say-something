@@ -1,5 +1,6 @@
 import './style.css';
-import { MODELS, MODES, modelById, runModel, type Mode } from './ai';
+import { MODELS, MODES, modelById, runModel, runModelAudio, type Mode } from './ai';
+import { Recorder, recorderSupported } from './recorder';
 import { Dictation, speechSupported } from './speech';
 import { addHistory, loadHistory, loadSettings, saveSettings, type HistoryEntry, type Settings } from './store';
 
@@ -20,6 +21,14 @@ const historyList = $('#history-list');
 
 let settings: Settings = loadSettings();
 let currentRun: AbortController | null = null;
+let lastAudio: Blob | null = null;
+// Set when realtime recognition fails in a way that recording can work around
+// (e.g. Edge on macOS returns 'network'). Persists for the session only.
+let realtimeBroken = false;
+
+function useRecorder(): boolean {
+  return settings.inputMethod === 'record' || realtimeBroken || !speechSupported;
+}
 
 // ---------- model & mode pickers ----------
 
@@ -78,7 +87,14 @@ const dictation = new Dictation({
     transcriptEl.value = finalText + (interim ? interim : '');
     transcriptEl.scrollTop = transcriptEl.scrollHeight;
   },
-  onError(message) {
+  onError(message, code) {
+    if (code === 'network' || code === 'service-not-allowed' || code === 'unsupported') {
+      // Realtime recognition unavailable (Edge on macOS, Brave, Firefox) —
+      // switch this session to the recording fallback.
+      realtimeBroken = true;
+      setStatus('即時語音辨識不可用,已切換為錄音模式 — 再按一次麥克風開始錄音', 'error');
+      return;
+    }
     setStatus(message, 'error');
   },
   onStop() {
@@ -91,13 +107,43 @@ const dictation = new Dictation({
   },
 });
 
-micBtn.addEventListener('click', () => {
-  if (dictation.active) {
-    dictation.stop();
+const recorder = new Recorder();
+
+async function toggleRecorder(): Promise<void> {
+  if (recorder.active) {
+    micBtn.classList.remove('recording');
+    setStatus('處理錄音中…', 'busy');
+    try {
+      lastAudio = await recorder.stop();
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err), 'error');
+      return;
+    }
+    await polishAudio(lastAudio);
     return;
   }
-  if (!speechSupported) {
-    setStatus('這個瀏覽器不支援語音辨識,請改用 Chrome 或 Safari;也可以直接打字後按「重新生成」。', 'error');
+  if (!recorderSupported) {
+    setStatus('這個瀏覽器不支援錄音,請改用 Chrome 或 Safari;也可以直接打字後按「重新生成」。', 'error');
+    return;
+  }
+  currentRun?.abort();
+  try {
+    await recorder.start();
+  } catch {
+    setStatus('無法使用麥克風,請在瀏覽器設定允許麥克風權限。', 'error');
+    return;
+  }
+  micBtn.classList.add('recording');
+  setStatus('錄音中… 再按一下結束(錄音模式)', 'rec');
+}
+
+micBtn.addEventListener('click', () => {
+  if (useRecorder()) {
+    void toggleRecorder();
+    return;
+  }
+  if (dictation.active) {
+    dictation.stop();
     return;
   }
   currentRun?.abort();
@@ -152,10 +198,66 @@ async function polish(): Promise<void> {
   }
 }
 
-$('#rerun-btn').addEventListener('click', () => void polish());
+async function polishAudio(audio: Blob): Promise<void> {
+  currentRun?.abort();
+  const run = new AbortController();
+  currentRun = run;
+
+  const mode = currentMode();
+  const model = modelById(settings.modelId);
+  const viaLabel = model.provider === 'gemini' ? model.label : 'Gemini 2.5 Flash';
+  setStatus(`${viaLabel} 正在轉錄並整理(${mode.label})…`, 'busy');
+  setResult('');
+
+  let result = '';
+  try {
+    await runModelAudio({
+      modelId: settings.modelId,
+      mode,
+      outputLang: settings.outputLang,
+      audio,
+      geminiKey: settings.geminiKey,
+      onTranscript(text) {
+        if (run.signal.aborted) return;
+        transcriptEl.value = text;
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      },
+      onResult(text) {
+        if (run.signal.aborted) return;
+        result = text;
+        resultEl.textContent = result;
+      },
+      signal: run.signal,
+    });
+    if (run.signal.aborted) return;
+    setStatus('完成,內容已可複製');
+    renderHistory(
+      addHistory({ at: Date.now(), transcript: transcriptEl.value.trim(), result, modelId: model.id, modeId: mode.id }),
+    );
+  } catch (err) {
+    if (run.signal.aborted) return;
+    setStatus(err instanceof Error ? err.message : String(err), 'error');
+  } finally {
+    if (currentRun === run) currentRun = null;
+  }
+}
+
+$('#rerun-btn').addEventListener('click', () => {
+  // Prefer the editable transcript text; fall back to re-running the last recording.
+  if (transcriptEl.value.trim()) {
+    void polish();
+  } else if (lastAudio) {
+    void polishAudio(lastAudio);
+  } else {
+    setStatus('沒有文字可以處理,先說點什麼吧');
+  }
+});
 
 $('#clear-btn').addEventListener('click', () => {
   currentRun?.abort();
+  recorder.cancel();
+  micBtn.classList.remove('recording');
+  lastAudio = null;
   transcriptEl.value = '';
   setResult('');
   setStatus('準備好了,按一下開始說話');
@@ -172,12 +274,14 @@ $('#copy-btn').addEventListener('click', async () => {
 
 const anthropicKeyInput = $<HTMLInputElement>('#anthropic-key');
 const geminiKeyInput = $<HTMLInputElement>('#gemini-key');
+const inputMethodSelect = $<HTMLSelectElement>('#input-method');
 const speechLangSelect = $<HTMLSelectElement>('#speech-lang');
 const outputLangSelect = $<HTMLSelectElement>('#output-lang');
 
 $('#settings-btn').addEventListener('click', () => {
   anthropicKeyInput.value = settings.anthropicKey;
   geminiKeyInput.value = settings.geminiKey;
+  inputMethodSelect.value = settings.inputMethod;
   speechLangSelect.value = settings.speechLang;
   outputLangSelect.value = settings.outputLang;
   settingsDialog.showModal();
@@ -188,6 +292,7 @@ settingsDialog.addEventListener('close', () => {
     ...settings,
     anthropicKey: anthropicKeyInput.value.trim(),
     geminiKey: geminiKeyInput.value.trim(),
+    inputMethod: inputMethodSelect.value === 'record' ? 'record' : 'auto',
     speechLang: speechLangSelect.value,
     outputLang: outputLangSelect.value,
   };
@@ -197,6 +302,8 @@ settingsDialog.addEventListener('close', () => {
 // First run: nudge towards settings if no key is present
 if (!settings.anthropicKey && !settings.geminiKey) {
   setStatus('第一次使用:點右上角齒輪,填入 Claude 或 Gemini 的 API key');
+} else if (useRecorder()) {
+  setStatus('錄音模式:按麥克風開始錄音,錄完由 Gemini 轉錄並整理');
 }
 
 // ---------- history ----------

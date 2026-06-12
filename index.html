@@ -78,6 +78,15 @@
         </label>
 
         <label class="field">
+          <span>語音輸入方式</span>
+          <select id="input-method">
+            <option value="auto">自動(即時辨識,失敗時改用錄音)</option>
+            <option value="record">錄音模式(錄完交給 Gemini 轉錄+潤飾)</option>
+          </select>
+          <small>Edge(Mac)、Firefox、Brave 的即時辨識常不可用,會自動切到錄音模式</small>
+        </label>
+
+        <label class="field">
           <span>語音辨識語言</span>
           <select id="speech-lang">
             <option value="zh-TW">中文(台灣)</option>

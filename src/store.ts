@@ -7,6 +7,9 @@ export interface Settings {
   outputLang: string;
   modelId: string;
   modeId: string;
+  /** auto: realtime speech recognition, falling back to recording when it fails.
+   *  record: always use the MediaRecorder + Gemini transcription path. */
+  inputMethod: 'auto' | 'record';
 }
 
 export interface HistoryEntry {
@@ -29,6 +32,7 @@ export function loadSettings(): Settings {
     outputLang: 'same',
     modelId: DEFAULT_MODEL,
     modeId: 'polish',
+    inputMethod: 'auto',
   };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
