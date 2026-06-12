@@ -98,7 +98,7 @@ export async function runModelAudio(opts: RunAudioOptions): Promise<void> {
 
   const system = [
     buildSystem(opts.mode, opts.outputLang),
-    '使用者提供的是一段語音錄音。請先把錄音內容聽寫成逐字稿,輸出逐字稿後換行輸出「---」一行,接著輸出依上述指示整理後的結果。',
+    '使用者提供的是一段語音錄音,內容可能中英夾雜;聽寫時英文詞請寫成英文、中文照寫中文,忠實保留原語言。請先把錄音內容聽寫成逐字稿,輸出逐字稿後換行輸出「---」一行,接著輸出依上述指示整理後的結果。',
   ].join('\n');
 
   const ai = new GoogleGenAI({ apiKey: opts.geminiKey });
@@ -134,11 +134,12 @@ export async function runModelAudio(opts: RunAudioOptions): Promise<void> {
 function buildSystem(mode: Mode, outputLang: string): string {
   const lang =
     outputLang === 'same'
-      ? '使用與原文相同的語言輸出(翻譯模式除外)。'
+      ? '使用與原文相同的語言輸出(翻譯模式除外);中英夾雜的原文就維持中英夾雜。'
       : `除非指示要求翻譯,輸出一律使用${outputLang}。`;
   return [
     '你是一個語音輸入的後製助手。使用者用說的產生了一段語音逐字稿,你的任務:',
     mode.instruction,
+    '說話內容可能中英夾雜。語音辨識引擎常把英文單字誤寫成發音相近的中文字、注音式拼法或拼錯的英文;請依上下文把這些詞還原成正確的英文(例如產品名、品牌、技術術語、人名),其餘內容保留原語言,不要把原本就是英文的詞翻成中文。',
     lang,
     '直接輸出整理後的文字,不要加任何前言、說明或引號。',
   ].join('\n');
