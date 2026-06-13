@@ -42,3 +42,9 @@ npm run build      # 輸出到 dist/
 - [`@anthropic-ai/sdk`](https://github.com/anthropics/anthropic-sdk-typescript)(瀏覽器直連,串流輸出)
 - [`@google/genai`](https://github.com/googleapis/js-genai)(串流輸出)
 - Web Speech API、PWA(manifest + service worker)
+
+## Android 鍵盤(原生輸入法)
+
+網頁版受瀏覽器沙盒限制,無法把文字直接送進「其他 App」的輸入框。若要「在任何 App 點輸入框 → 講話 → 文字直接出現在框裡」,需要系統層的輸入法。
+
+`android/` 目錄是一個 Android 自訂鍵盤(IME):切到這個鍵盤、按麥克風講話,Gemini 轉錄+潤飾後的文字直接 `commitText` 進當前輸入框,不用複製貼上。建置與安裝說明見 [`android/README.md`](android/README.md)。

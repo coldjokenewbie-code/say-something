@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#12100E">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Say Something 鍵盤"
+            android:textColor="#ECE6DC"
+            android:textSize="22sp"
+            android:paddingBottom="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="用說的,讓 AI 直接把整理好的文字打進任何輸入框。"
+            android:textColor="#9C9489"
+            android:textSize="13sp"
+            android:paddingBottom="20dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Gemini API Key"
+            android:textColor="#ECE6DC"
+            android:paddingBottom="4dp" />
+
+        <EditText
+            android:id="@+id/key_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="AIza..."
+            android:textColorHint="#6B655D"
+            android:textColor="#ECE6DC"
+            android:inputType="textPassword"
+            android:autofillHints="" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="到 aistudio.google.com/apikey 免費取得,只存在這台手機。"
+            android:textColor="#9C9489"
+            android:textSize="12sp"
+            android:paddingBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="模型"
+            android:textColor="#ECE6DC"
+            android:paddingBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/model_spinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="輸出語言"
+            android:textColor="#ECE6DC"
+            android:paddingBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/lang_spinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="20dp" />
+
+        <Button
+            android:id="@+id/btn_save"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="儲存設定"
+            android:textAllCaps="false"
+            android:backgroundTint="#E8A04C"
+            android:textColor="#1C1208" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#35302A"
+            android:layout_marginVertical="20dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="啟用步驟(只需做一次)"
+            android:textColor="#ECE6DC"
+            android:textSize="16sp"
+            android:paddingBottom="10dp" />
+
+        <Button
+            android:id="@+id/btn_permission"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1. 授予麥克風權限"
+            android:textAllCaps="false"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_enable"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="2. 在系統設定啟用此鍵盤"
+            android:textAllCaps="false"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_pick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="3. 選擇此鍵盤為輸入法"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="之後在任何 App 點輸入框,點右下角鍵盤圖示切到「Say Something 鍵盤」,按麥克風講話即可。"
+            android:textColor="#9C9489"
+            android:textSize="12sp"
+            android:paddingTop="14dp" />
+    </LinearLayout>
+</ScrollView>
