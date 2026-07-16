@@ -270,15 +270,21 @@ final class SessionService: NSObject, ObservableObject {
         let system = Prompts.buildSystem(mode: mode, outputLang: settings.outputLang)
         let apiKey = settings.geminiKey
         let model = settings.model
+        let transcriptionMode = settings.transcriptionMode
+        let whisperLanguage = settings.whisperLanguage
+        let whisperModelId = settings.whisperModelId
 
         Task {
             do {
-                let text = try await GeminiClient.transcribeAndPolish(
+                let text = try await Self.transcribeAndPolish(
+                    audioData: data,
+                    transcriptionMode: transcriptionMode,
+                    whisperLanguage: whisperLanguage,
+                    whisperModelId: whisperModelId,
                     apiKey: apiKey,
                     model: model,
                     system: system,
-                    audioData: data,
-                    mime: "audio/mp4"
+                    onStatus: { status in KeyboardBridge.setString(status, for: .status) }
                 )
                 await MainActor.run {
                     KeyboardBridge.setString(text, for: .result)
@@ -290,6 +296,40 @@ final class SessionService: NSObject, ObservableObject {
                 await MainActor.run { self.publishError(message) }
             }
         }
+    }
+
+    /// Shared by the keyboard-driven Session flow above and ContentView's
+    /// in-app mic button: dispatches on AppSettings.transcriptionMode.
+    /// - local (預設): whisper.cpp transcribes on-device (audio never
+    ///   leaves the phone), then only the resulting text goes to Gemini for
+    ///   polishing via GeminiClient.polishText.
+    /// - cloud: unchanged original path — raw audio goes to Gemini, which
+    ///   transcribes and polishes in one call (C4: kept fully working).
+    static func transcribeAndPolish(
+        audioData: Data,
+        transcriptionMode: String,
+        whisperLanguage: String,
+        whisperModelId: String,
+        apiKey: String,
+        model: String,
+        system: String,
+        onStatus: (String) -> Void
+    ) async throws -> String {
+        guard transcriptionMode == "local" else {
+            return try await GeminiClient.transcribeAndPolish(
+                apiKey: apiKey, model: model, system: system, audioData: audioData, mime: "audio/mp4"
+            )
+        }
+
+        onStatus("transcribing")
+        let whisperModel = ModelManager.model(byId: whisperModelId) ?? ModelManager.models[0]
+        let modelPath = ModelManager.shared.localURL(for: whisperModel).path
+        let transcript = try await WhisperTranscriber.transcribe(
+            audioData: audioData, modelPath: modelPath, language: whisperLanguage
+        )
+
+        onStatus("polishing")
+        return try await GeminiClient.polishText(apiKey: apiKey, model: model, system: system, text: transcript)
     }
 
     private func publishError(_ message: String) {

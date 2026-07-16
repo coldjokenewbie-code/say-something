@@ -16,6 +16,8 @@
 - [ ] 階段 4 功能驗收:實機講話→潤飾→複製(待使用者回報)
 - [x] 階段 6 鍵盤延伸實作(契約 say-something-ios-keyboard-20260716,Wispr Flow session 架構,PRD 階段 6 節):鍵盤 target+SessionService 背景保活+KeyboardBridge(Darwin+App Group,UIPasteboard 降級)+私有 API 彈回(含手動降級),兩處 simulator 建置 exit 0
 - [ ] 階段 6 實機驗收:重新安裝、啟用鍵盤+Full Access、任意 App 輸入框講話→潤飾直入(App Group 免費帳號可用性、suspend 私有 API、背景 session 存活時長皆待實測)
+- [x] 階段 7 本地轉錄實作(契約 say-something-ios-whisper-20260716):whisper.cpp v1.6.2 vendor 進主 App(純 CPU/NEON,鍵盤 target 零觸碰)、WhisperTranscriber(load-per-use)、ModelManager(HF 官方 ggml 模型下載,q5_1——q5_0 該尺寸不存在已驗證 404)、GeminiClient.polishText 純文字路徑、設定可切本地/雲端
+- [ ] 階段 7 實機驗收:下載模型、實測 iPhone X 轉錄速度/記憶體(10-30 秒為估計值未實測)、背景下載完成度
 - [ ] push 到 GitHub(待使用者確認)
 - [ ] (選配)AppIcon 實際圖示;三端模式同步(web 已有第 8 模式「簡潔」,Android/iOS 停在 7 模式)
 

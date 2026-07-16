@@ -204,15 +204,24 @@ struct ContentView: View {
         let system = Prompts.buildSystem(mode: mode, outputLang: settings.outputLang)
         let apiKey = settings.geminiKey
         let model = settings.model
+        let transcriptionMode = settings.transcriptionMode
+        let whisperLanguage = settings.whisperLanguage
+        let whisperModelId = settings.whisperModelId
 
         Task {
             do {
-                let text = try await GeminiClient.transcribeAndPolish(
+                // Main-screen mic button honors the same 轉錄方式 setting as
+                // the keyboard Session flow (SessionService.transcribeAndPolish) —
+                // local whisper.cpp or cloud Gemini, picked in SettingsView.
+                let text = try await SessionService.transcribeAndPolish(
+                    audioData: audio.data,
+                    transcriptionMode: transcriptionMode,
+                    whisperLanguage: whisperLanguage,
+                    whisperModelId: whisperModelId,
                     apiKey: apiKey,
                     model: model,
                     system: system,
-                    audioData: audio.data,
-                    mime: audio.mime
+                    onStatus: { _ in }
                 )
                 await MainActor.run {
                     resultText = text

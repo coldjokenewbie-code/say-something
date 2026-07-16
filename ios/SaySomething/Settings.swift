@@ -15,11 +15,24 @@ final class AppSettings: ObservableObject {
         ("日本語", "日本語"),
     ]
 
+    /// Whisper transcription language codes — passed straight into
+    /// whisper_full_params.language ("auto" maps to nil + detect_language).
+    static let whisperLanguages: [(value: String, label: String)] = [
+        ("auto", "自動偵測"),
+        ("zh", "中文"),
+        ("en", "English"),
+        ("ja", "日本語"),
+        ("ko", "한국어"),
+    ]
+
     private let defaults = UserDefaults.standard
     private enum Keys {
         static let model = "model"
         static let outputLang = "output_lang"
         static let modeId = "mode"
+        static let transcriptionMode = "transcription_mode"
+        static let whisperLanguage = "whisper_language"
+        static let whisperModelId = "whisper_model_id"
     }
 
     @Published var geminiKey: String {
@@ -38,11 +51,27 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(modeId, forKey: Keys.modeId) }
     }
 
+    /// "local" (預設,聲音不出手機,whisper.cpp) or "cloud" (送音檔給 Gemini,品質最好).
+    @Published var transcriptionMode: String {
+        didSet { defaults.set(transcriptionMode, forKey: Keys.transcriptionMode) }
+    }
+
+    @Published var whisperLanguage: String {
+        didSet { defaults.set(whisperLanguage, forKey: Keys.whisperLanguage) }
+    }
+
+    @Published var whisperModelId: String {
+        didSet { defaults.set(whisperModelId, forKey: Keys.whisperModelId) }
+    }
+
     init() {
         geminiKey = KeychainStore.load()
         model = defaults.string(forKey: Keys.model) ?? "gemini-2.5-flash"
         outputLang = defaults.string(forKey: Keys.outputLang) ?? "same"
         modeId = defaults.string(forKey: Keys.modeId) ?? "polish"
+        transcriptionMode = defaults.string(forKey: Keys.transcriptionMode) ?? "local"
+        whisperLanguage = defaults.string(forKey: Keys.whisperLanguage) ?? "auto"
+        whisperModelId = defaults.string(forKey: Keys.whisperModelId) ?? "small-q5_1"
     }
 
     var currentMode: Mode {

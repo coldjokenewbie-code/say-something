@@ -1,6 +1,8 @@
 # Say Something — iOS 版
 
-公務機(iPhone X、iOS 16.7.16,永遠無法升 iOS 17)用的原生 App:按麥克風講話(中文為主夾英文)→ Gemini 聽原始音檔轉錄+潤飾 → 顯示文字一鍵複製。另含 **SaySomethingKeyboard** 鍵盤延伸,可把潤飾結果直接插入任何 App 的輸入框(Session 式架構,見下方「鍵盤延伸」一節)。
+公務機(iPhone X、iOS 16.7.16,永遠無法升 iOS 17)用的原生 App:按麥克風講話(中文為主夾英文)→ 轉錄+潤飾 → 顯示文字一鍵複製。另含 **SaySomethingKeyboard** 鍵盤延伸,可把潤飾結果直接插入任何 App 的輸入框(Session 式架構,見下方「鍵盤延伸」一節)。
+
+轉錄方式在設定頁可切換(見下方「本地 vs 雲端轉錄」一節):**本地 whisper.cpp**(預設,聲音不出手機,只送文字給 Gemini 潤飾)或 **雲端 Gemini**(送原始音檔給 Gemini 聽寫+潤飾,品質最好)。
 
 不上架 App Store,內部側載使用(免費 Apple ID,7 天重簽)。
 
@@ -21,6 +23,9 @@ ios/
     Settings.swift               模型/語言/模式設定(UserDefaults)+ API key 存取(轉呼叫 Keychain)
     KeychainStore.swift          API key 存取,走 SecItem API,不落 UserDefaults
     HistoryStore.swift           歷史紀錄存取(UserDefaults JSON,上限 30 筆)
+    WhisperTranscriber.swift     本地轉錄:AVAudioConverter 轉 16kHz mono Float32 → whisper.cpp whisper_full() → 純文字;load-per-use(用完即 whisper_free,不常駐記憶體)
+    ModelManager.swift           whisper ggml 模型下載管理(背景 URLSession + 進度)、存放/刪除,含 AppDelegate(接背景下載完成回呼)
+    SaySomething-Bridging-Header.h   把 Vendor/whisper.cpp/whisper.h 的 C API 橋接給 Swift(僅主 App target)
     Info.plist                   含 NSMicrophoneUsageDescription、UIBackgroundModes(audio)、saysomething:// URL scheme
     SaySomething.entitlements    App Group(group.com.saysomething.app)
     Assets.xcassets              App 圖示 / 主題色(僅骨架,尚未放實際圖示)
@@ -30,9 +35,57 @@ ios/
     SaySomethingKeyboard.entitlements  App Group(同上,與主 App 共用)
   Shared/
     KeyboardBridge.swift        兩 target 共用的跨進程橋接:Darwin notification 信號 + App Group(降級走 named UIPasteboard)資料通道
+  Vendor/whisper.cpp/           whisper.cpp 原始碼(vendored,只掛主 App target,見下方「本地轉錄引擎」)
 ```
 
 Deployment target:iOS 16.0(兩個 target 皆同)。SwiftUI lifecycle,Swift 5,只用 iOS 16 可用 API。
+
+## 本地 vs 雲端轉錄
+
+設定頁「轉錄方式」可切換,重啟後保留選擇:
+
+| | 本地 whisper(預設) | 雲端 Gemini |
+|---|---|---|
+| 聲音檔案 | **不離開手機**,只在裝置本地轉文字 | 送到 Google Gemini API |
+| 送到 Gemini 的內容 | 只有轉錄出的**純文字**(供潤飾) | 原始錄音檔(Gemini 直接聽寫+潤飾) |
+| 速度 | 較慢(見下方效能預期) | 較快(單次 API 呼叫) |
+| 中英夾雜辨識品質 | 較弱(local whisper 對code-switch較不擅長) | 較好 |
+| 需要網路 | 僅潤飾那一步需要(轉錄本身離線) | 全程需要 |
+| 適用情境 | 內容較機敏、不想錄音離開裝置 | 追求最佳品質、不在意錄音上雲 |
+
+兩個模式共用同一份 `Prompts.swift` 七模式 prompt(潤飾/原樣/正式/訊息/Email/筆記/翻譯),只是「潤飾」這一步的輸入是文字還是連音檔一起送,語意保持一致。
+
+## 本地轉錄引擎(whisper.cpp)
+
+- **來源**:vendor 進 `ios/Vendor/whisper.cpp/`,取自 [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) **v1.6.2** 的必要原始檔(`ggml.c/.h`、`ggml-alloc.c/.h`、`ggml-backend.c/.h/-impl.h`、`ggml-common.h`、`ggml-impl.h`、`ggml-quants.c/.h`、`whisper.cpp/.h`)。
+  - **版本選擇說明**:whisper.cpp 從 v1.7.0 起把 ggml 拆成多後端(CUDA/Metal/Vulkan/SYCL/…)的目錄結構,CPU 後端也拆成十幾個檔案並依賴 CMake 做特徵偵測,手寫 pbxproj 整合成本極高、容易漏檔。v1.6.2 是拆分前最後一個扁平結構版本(單一 `ggml.c` 含 CPU/NEON 實作),whisper.cpp 官方 iOS 範例(`examples/whisper.objc`)當年也是用這個結構手動加進 Xcode 專案。功能上 v1.6.2 已支援 q5_1/q8_0 量化模型與繁中/多語辨識,滿足本專案需求。
+  - **CPU-only(NEON),沒有 Metal 後端**:`whisper_context_params.use_gpu` 固定為 `false`;沒有 vendor `ggml-metal.m/.h/.metal`。原因:(1) whisper.h/whisper.cpp/ggml.c 對 Metal/CUDA/OpenCL 的 `#include` 都包在 `#ifdef GGML_USE_METAL` 等巨集後面,不定義巨集就完全不會編譯到那些路徑,手寫 pbxproj 不需要額外處理 `.metal` shader 編譯規則;(2) 目標機種 iPhone X(A11)的 Metal 加速在 whisper.cpp 上收益本就有限,純 CPU/NEON 路線更省事也更可預期。
+  - C/C++ 混編:`.c`(C11/gnu17,專案既有設定)與 `.cpp`(C++17,專案 `CLANG_CXX_LANGUAGE_STANDARD = gnu++20` 已滿足)透過 `SaySomething-Bridging-Header.h` 匯入 `whisper.h`(純 C ABI,`extern "C"` 包住,Swift 端直接呼叫 `whisper_init_from_file_with_params`/`whisper_full`/`whisper_free` 等函式,無需額外 Objective-C++ wrapper)。
+  - **只掛主 App target**:`project.pbxproj` 裡這些檔案的 `PBXBuildFile` 只出現在 `SaySomething` target 的 Sources build phase,`SaySomethingKeyboard` target 的 Sources build phase(以及任何其他 build phase)完全沒有引用——鍵盤延伸的記憶體上限(60-70MB)碰不到 whisper/ggml 的一行程式碼或一個位元組。
+  - 不打包 bitcode 相關設定(Xcode 14 起已移除 bitcode,本專案 objectVersion 56 / Xcode 26.6 原生無此概念,不需額外處理)。
+- **記憶體策略(load-per-use)**:`WhisperTranscriber.runWhisper` 每次轉錄都呼叫 `whisper_init_from_file_with_params` 載入模型、跑完 `whisper_full`、`defer { whisper_free(ctx) }` 立刻釋放,包含錯誤路徑;沒有任何常駐的 whisper context 或全域快取。A11/3GB 裝置在背景 session 期間不會一直佔著模型的記憶體。
+
+## 模型下載(ModelManager)
+
+- 模型**不隨 App 打包**,執行期才下載,存在 `Application Support/WhisperModels/`。
+- 內建兩個模型(URL 皆來自 [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp),下載前已用 `curl -I` 驗證可達):
+
+  | 模型 | 檔名 | 大小 | 特性 |
+  |---|---|---|---|
+  | Small(預設) | `ggml-small-q5_1.bin` | ~190 MB | 中文堪用,較慢 |
+  | Base | `ggml-base-q5_1.bin` | ~60 MB | 較快,中文辨識較差 |
+
+  > PRD/契約原先寫「q5_0」,但 ggerganov/whisper.cpp 官方 Hugging Face 倉庫的 small/base 尺寸只發佈 `q5_1`(5-bit)與 `q8_0`(8-bit)量化,沒有 `q5_0`(`curl -I` 對 `ggml-small-q5_0.bin` 回 404,對 `ggml-small-q5_1.bin` 回 200/302 導頁至可下載的 CDN)。改用 `q5_1` 是對「5-bit 量化」原意最接近的正確替代。
+
+- 設定頁「轉錄模型」區可選擇要用哪個模型、看下載進度(百分比)、刪除已下載的模型、重新下載。下載用背景 `URLSession`(`background(withIdentifier:)`),App 被系統背景化時下載仍會繼續。
+- 若選擇本地轉錄但模型還沒下載,轉錄會回報「轉錄模型尚未下載,請到設定頁下載模型。」而不是閃退。
+
+## iPhone X 效能預期(未實測,基於 PRD 階段 7 已知取捨)
+
+- **首次使用**:App 需連網下載一次模型(Small ~190MB 或 Base ~60MB),依網路狀況數十秒到數分鐘不等;下載完成後即可離線轉錄。
+- **每次轉錄**:iPhone X 是純 CPU(A11,無 Metal 加速路徑),10 秒錄音預估 **10-30 秒**轉錄時間,另外每次轉錄開始都要重新載入模型(load-per-use 策略換取記憶體安全,犧牲一點速度)——Small 模型載入本身可能再加數秒。轉錄完成後才送純文字給 Gemini 潤飾(通常 1-3 秒)。
+- 相較雲端 Gemini 模式(直接送音檔,單次 API 呼叫,通常數秒內有結果),本地模式明顯較慢,這是為了聲紋不出手機而接受的已知取捨(PRD 階段 7 已向使用者揭示)。
+- 若本地轉錄速度在實機測試中無法接受,可在設定頁隨時切回「雲端 Gemini」模式,兩條路徑都保持可用。
 
 ## 鍵盤延伸(Session 式架構,同 Wispr Flow)
 
@@ -105,7 +158,8 @@ xcodebuild -project SaySomething.xcodeproj -scheme SaySomething -sdk iphonesimul
 
 ## 已知限制
 
-- 未上架 App Store,僅供內部側載使用,語音內容會送至 Google Gemini API 處理(潤飾/轉錄),請避免處理高度機敏內容。
+- 未上架 App Store,僅供內部側載使用。**雲端 Gemini 模式**下語音內容會送至 Google Gemini API 處理(聽寫+潤飾);**本地 whisper 模式**(預設)聲音不出手機,只有轉錄後的文字會送 Gemini 潤飾。無論哪個模式,請避免處理高度機敏內容。
+- 本地轉錄模型需要執行期下載(見上方「模型下載」),App 安裝完第一次使用前需連一次網路;下載完成後轉錄本身可離線進行,只有潤飾那一步需要網路。
 - 免費帳號同一 Apple ID 最多同時側載 3 個 App(App + 鍵盤延伸算同一個 App,不會多佔額度)。
 - App 圖示(`Assets.xcassets/AppIcon.appiconset`)目前為空白骨架,尚未放入實際圖示圖檔,不影響功能運作。
 - **鍵盤延伸不能自己錄音**(iOS 系統限制),每次要用語音輸入都得先透過鍵盤的「啟動 Say Something」跳轉主 App 一次,啟動背景保活 session 後才能開始講話。

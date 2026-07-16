@@ -27,6 +27,9 @@ enum GeminiError: LocalizedError {
 /// android/app/src/main/java/com/saysomething/keyboard/Gemini.kt (same
 /// v1beta endpoint, same inline_data + system_instruction JSON shape).
 enum GeminiClient {
+    /// Cloud mode (PRD 階段 7): sends the raw recording, Gemini both
+    /// transcribes and polishes it in one call. Kept as-is — this is the
+    /// "送音檔,品質最好" path the settings toggle can still pick.
     static func transcribeAndPolish(
         apiKey: String,
         model: String,
@@ -34,14 +37,6 @@ enum GeminiClient {
         audioData: Data,
         mime: String
     ) async throws -> String {
-        guard !apiKey.isEmpty else { throw GeminiError.noApiKey }
-
-        guard let url = URL(
-            string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)"
-        ) else {
-            throw GeminiError.network("無效的網址")
-        }
-
         let body: [String: Any] = [
             "system_instruction": [
                 "parts": [["text": system]]
@@ -60,6 +55,44 @@ enum GeminiClient {
                 ]
             ],
         ]
+        return try await send(apiKey: apiKey, model: model, body: body)
+    }
+
+    /// Local mode (PRD 階段 7): whisper.cpp already turned the recording
+    /// into plain text on-device (see WhisperTranscriber); only that text —
+    /// never audio — is sent here. Uses the exact same `system` instruction
+    /// built by Prompts.buildSystem as the audio path (C7: single prompt
+    /// source, same seven-mode semantics), just with a text part instead of
+    /// inline_data.
+    static func polishText(
+        apiKey: String,
+        model: String,
+        system: String,
+        text: String
+    ) async throws -> String {
+        let body: [String: Any] = [
+            "system_instruction": [
+                "parts": [["text": system]]
+            ],
+            "contents": [
+                [
+                    "parts": [
+                        ["text": text],
+                    ]
+                ]
+            ],
+        ]
+        return try await send(apiKey: apiKey, model: model, body: body)
+    }
+
+    private static func send(apiKey: String, model: String, body: [String: Any]) async throws -> String {
+        guard !apiKey.isEmpty else { throw GeminiError.noApiKey }
+
+        guard let url = URL(
+            string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)"
+        ) else {
+            throw GeminiError.network("無效的網址")
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
