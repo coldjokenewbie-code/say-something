@@ -89,10 +89,13 @@ final class SessionService: NSObject, ObservableObject {
     func startKeepAlive() {
         registerSignalObserversOnce()
         registerInterruptionObserverOnce()
-        guard !isKeepAliveActive else {
+        // engine.isRunning 必須連動檢查:中斷後 shouldResume 未給時 engine 已停但
+        // isKeepAliveActive 仍 true,若只看 flag 會提早 return,session 永遠救不回來。
+        guard !(isKeepAliveActive && engine.isRunning) else {
             markHeartbeatIfEngineRunning()
             return
         }
+        isKeepAliveActive = false
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker])
