@@ -24,13 +24,32 @@ final class SessionService: NSObject, ObservableObject {
     @Published var lastError: String?
 
     private let engine = AVAudioEngine()
-    private var audioFile: AVAudioFile?
-    private var isCapturingToFile = false
     private var heartbeatTimer: Timer?
     private var observersRegistered = false
+    private var interruptionObserverRegistered = false
+
+    /// `isCapturing`/`file` are written from Darwin-notification callbacks
+    /// (main thread, via DarwinObserverRegistry) and read+written from the
+    /// audio tap callback (an internal CoreAudio render thread) on every
+    /// buffer. `captureLock` makes both fields move together atomically and
+    /// — critically — is held for the full duration of each `file.write`,
+    /// so `finishCaptureAndProcess` blocks until any in-flight write
+    /// completes before it clears the file reference and reads the file
+    /// back off disk. That's what guarantees the last buffer is flushed
+    /// before the file is considered "done".
+    private struct CaptureState {
+        var isCapturing = false
+        var file: AVAudioFile?
+    }
+    private let captureLock = NSLock()
+    private var captureState = CaptureState()
 
     private override init() {
         super.init()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: - Entry point: saysomething://session
@@ -69,8 +88,9 @@ final class SessionService: NSObject, ObservableObject {
 
     func startKeepAlive() {
         registerSignalObserversOnce()
+        registerInterruptionObserverOnce()
         guard !isKeepAliveActive else {
-            markHeartbeatAndArmTimer()
+            markHeartbeatIfEngineRunning()
             return
         }
         let session = AVAudioSession.sharedInstance()
@@ -96,22 +116,85 @@ final class SessionService: NSObject, ObservableObject {
             engine.prepare()
             try engine.start()
             isKeepAliveActive = true
-            markHeartbeatAndArmTimer()
+            armHeartbeatTimer()
         } catch {
             lastError = "無法啟動錄音保活引擎:\(error.localizedDescription)"
         }
     }
 
-    private func markHeartbeatAndArmTimer() {
-        KeyboardBridge.markHeartbeat()
+    /// Heartbeat is tied directly to `engine.isRunning` rather than to our
+    /// own `isKeepAliveActive` flag: the engine can stop out from under us
+    /// (audio session interruption, route change, background suspension)
+    /// without us necessarily hearing about it in time. If the engine isn't
+    /// actually running, we must not keep telling the keyboard the session
+    /// is alive.
+    private func armHeartbeatTimer() {
+        markHeartbeatIfEngineRunning()
         heartbeatTimer?.invalidate()
-        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
-            KeyboardBridge.markHeartbeat()
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            self?.markHeartbeatIfEngineRunning()
         }
     }
 
+    private func markHeartbeatIfEngineRunning() {
+        guard engine.isRunning else { return }
+        KeyboardBridge.markHeartbeat()
+    }
+
+    // MARK: - Audio session interruptions (phone call, Siri, another app
+    // grabbing the mic, etc.)
+
+    private func registerInterruptionObserverOnce() {
+        guard !interruptionObserverRegistered else { return }
+        interruptionObserverRegistered = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInterruption(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+    }
+
+    @objc private func handleInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+        else { return }
+
+        switch type {
+        case .began:
+            // The system has already yanked the engine out from under us.
+            // Pausing on our side keeps our state consistent; letting the
+            // heartbeat lapse (armHeartbeatTimer checks engine.isRunning)
+            // is what lets the keyboard notice the session is down instead
+            // of us having to push a signal we might not get a chance to send.
+            engine.pause()
+        case .ended:
+            var shouldResume = false
+            if let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt {
+                shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume)
+            }
+            guard shouldResume, isKeepAliveActive else { return }
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+                try engine.start()
+                armHeartbeatTimer()
+            } catch {
+                lastError = "背景保活中斷後恢復失敗:\(error.localizedDescription)"
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    /// Runs on the audio render thread. Holds `captureLock` for the whole
+    /// write so a concurrent `finishCaptureAndProcess` call on the main
+    /// thread can't clear the file reference out from under an in-flight
+    /// write (see `CaptureState` doc above).
     private func writeBufferIfCapturing(_ buffer: AVAudioPCMBuffer) {
-        guard isCapturingToFile, let file = audioFile else { return }
+        captureLock.lock()
+        defer { captureLock.unlock() }
+        guard captureState.isCapturing, let file = captureState.file else { return }
         try? file.write(from: buffer)
     }
 
@@ -140,24 +223,36 @@ final class SessionService: NSObject, ObservableObject {
             AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
         ]
         do {
-            audioFile = try AVAudioFile(forWriting: url, settings: settings)
-            isCapturingToFile = true
+            let file = try AVAudioFile(forWriting: url, settings: settings)
+            captureLock.lock()
+            captureState = CaptureState(isCapturing: true, file: file)
+            captureLock.unlock()
             KeyboardBridge.setString("recording", for: .status)
         } catch {
-            audioFile = nil
-            isCapturingToFile = false
+            captureLock.lock()
+            captureState = CaptureState()
+            captureLock.unlock()
             publishError("無法建立錄音檔:\(error.localizedDescription)")
         }
     }
 
     private func finishCaptureAndProcess() {
-        guard isCapturingToFile, let file = audioFile else {
+        // Flip `isCapturing` off and take the file reference under the same
+        // lock the tap callback uses around `file.write` — this blocks
+        // until any write already in flight on the audio thread finishes,
+        // so the file on disk reflects every buffer up to this point
+        // before we read it back below.
+        captureLock.lock()
+        let wasCapturing = captureState.isCapturing
+        let file = captureState.file
+        captureState = CaptureState()
+        captureLock.unlock()
+
+        guard wasCapturing, let file else {
             publishError("沒有進行中的錄音,請重新按麥克風開始。")
             return
         }
-        isCapturingToFile = false
         let url = file.url
-        audioFile = nil
         KeyboardBridge.setString("processing", for: .status)
 
         guard let data = try? Data(contentsOf: url) else {

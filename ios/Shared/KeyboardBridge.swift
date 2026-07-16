@@ -7,10 +7,10 @@ import Foundation
 ///
 /// Signal channel: Darwin notifications (CFNotificationCenter), which work
 /// across processes even without App Group entitlements.
-/// Data channel: App Group shared UserDefaults when available; falls back
-/// to a named UIPasteboard (JSON blob) when the App Group container is not
-/// usable (e.g. free Personal Team signing without a verified App Group
-/// entitlement).
+/// Data channel: dual-written to BOTH App Group shared UserDefaults and a
+/// named UIPasteboard, each value timestamped; reads take whichever side is
+/// newer. See `SharedStore` for why a single-channel "probe and pick one"
+/// approach isn't reliable under free Personal Team signing.
 enum KeyboardBridge {
     /// App Group identifier shared by both targets' entitlements.
     static let appGroupID = "group.com.saysomething.app"
@@ -93,17 +93,28 @@ enum KeyboardBridge {
     }
 }
 
-/// Reads/writes the shared data channel. Tries the App Group container
-/// first; if it's not usable (returns nil, which happens when the App
-/// Group entitlement isn't actually provisioned — e.g. an unverified free
-/// Personal Team signing), falls back to a named UIPasteboard holding a
-/// small JSON dictionary. Detection happens once per process and is
-/// cached.
+/// Reads/writes the shared data channel.
+///
+/// Originally this gated on a same-process "write a sentinel value into the
+/// App Group UserDefaults, read it back" probe and used the App Group
+/// exclusively if that round-tripped. That probe can **false-positive**
+/// under free Personal Team signing: `UserDefaults(suiteName:)` silently
+/// falls back to a private, per-process defaults domain when the App Group
+/// entitlement isn't actually provisioned, so each process's own
+/// write-then-read-back of its own value always succeeds even though the
+/// two processes are never actually sharing a container. A same-process
+/// self-test cannot detect a cross-process failure.
+///
+/// Fix: dual-write every value to BOTH the App Group UserDefaults and a
+/// named `UIPasteboard` (which is genuinely cross-process even without any
+/// entitlement) tagged with a timestamp, and on read take whichever channel
+/// has the newer value. Whichever channel is actually broken (writes to it
+/// simply never show up on the other side) loses every comparison, so it's
+/// self-correcting at read time instead of relying on a probe that can lie.
 final class SharedStore {
     static let shared = SharedStore()
 
     private let pasteboardName = "com.saysomething.app.pasteboard"
-    private var useAppGroupCache: Bool?
 
     private init() {}
 
@@ -111,60 +122,70 @@ final class SharedStore {
         UserDefaults(suiteName: KeyboardBridge.appGroupID)
     }
 
-    /// Runtime probe: write+read a sentinel value. If it round-trips, the
-    /// App Group container is usable.
-    private func appGroupWorks() -> Bool {
-        if let cached = useAppGroupCache { return cached }
-        let works: Bool
-        if let defaults = appGroupDefaults {
-            let probeKey = "__saysomething_probe__"
-            let probeValue = UUID().uuidString
-            defaults.set(probeValue, forKey: probeKey)
-            works = defaults.string(forKey: probeKey) == probeValue
-            defaults.removeObject(forKey: probeKey)
-        } else {
-            works = false
-        }
-        useAppGroupCache = works
-        return works
-    }
-
     func setString(_ value: String, for key: KeyboardBridge.Key) {
-        if appGroupWorks() {
-            appGroupDefaults?.set(value, forKey: key.rawValue)
-        } else {
-            var blob = readPasteboardBlob()
-            blob[key.rawValue] = value
-            writePasteboardBlob(blob)
-        }
+        let ts = Date().timeIntervalSince1970
+        writeAppGroup(value: value, ts: ts, key: key)
+        writePasteboard(value: value, ts: ts, key: key)
     }
 
     func string(for key: KeyboardBridge.Key) -> String? {
-        if appGroupWorks() {
-            return appGroupDefaults?.string(forKey: key.rawValue)
-        } else {
-            return readPasteboardBlob()[key.rawValue]
+        let fromAppGroup = readAppGroup(key: key)
+        let fromPasteboard = readPasteboard(key: key)
+        switch (fromAppGroup, fromPasteboard) {
+        case let (a?, b?):
+            return a.ts >= b.ts ? a.value : b.value
+        case let (a?, nil):
+            return a.value
+        case let (nil, b?):
+            return b.value
+        case (nil, nil):
+            return nil
         }
     }
 
-    // MARK: - Named UIPasteboard fallback (JSON blob of all keys)
+    // MARK: - App Group channel
 
-    private func readPasteboardBlob() -> [String: String] {
+    private func writeAppGroup(value: String, ts: TimeInterval, key: KeyboardBridge.Key) {
+        guard let defaults = appGroupDefaults else { return }
+        defaults.set(value, forKey: key.rawValue)
+        defaults.set(ts, forKey: key.rawValue + ".ts")
+    }
+
+    private func readAppGroup(key: KeyboardBridge.Key) -> (value: String, ts: TimeInterval)? {
+        guard let defaults = appGroupDefaults,
+              let value = defaults.string(forKey: key.rawValue) else { return nil }
+        let ts = defaults.double(forKey: key.rawValue + ".ts")
+        return (value, ts)
+    }
+
+    // MARK: - Named UIPasteboard channel (JSON blob: key -> {value, ts})
+
+    private func readPasteboard(key: KeyboardBridge.Key) -> (value: String, ts: TimeInterval)? {
         #if canImport(UIKit)
         guard let pb = UIPasteboardCompat.named(pasteboardName),
               let data = pb.data(),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String]
-        else { return [:] }
-        return dict
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Any]],
+              let entry = root[key.rawValue],
+              let value = entry["value"] as? String
+        else { return nil }
+        let ts = entry["ts"] as? TimeInterval ?? 0
+        return (value, ts)
         #else
-        return [:]
+        return nil
         #endif
     }
 
-    private func writePasteboardBlob(_ blob: [String: String]) {
+    private func writePasteboard(value: String, ts: TimeInterval, key: KeyboardBridge.Key) {
         #if canImport(UIKit)
-        guard let data = try? JSONSerialization.data(withJSONObject: blob) else { return }
-        UIPasteboardCompat.named(pasteboardName)?.setData(data)
+        guard let pb = UIPasteboardCompat.named(pasteboardName) else { return }
+        var root: [String: [String: Any]] = [:]
+        if let data = pb.data(),
+           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Any]] {
+            root = existing
+        }
+        root[key.rawValue] = ["value": value, "ts": ts]
+        guard let newData = try? JSONSerialization.data(withJSONObject: root) else { return }
+        pb.setData(newData)
         #endif
     }
 }
