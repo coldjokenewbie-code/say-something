@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var history: HistoryStore
+    @EnvironmentObject private var session: SessionService
     @StateObject private var recorder = Recorder()
 
     @State private var resultText = ""
@@ -14,6 +15,10 @@ struct ContentView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 24) {
+                if session.showManualReturnHint {
+                    manualReturnBanner
+                }
+
                 modePicker
 
                 Spacer()
@@ -68,6 +73,24 @@ struct ContentView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+
+    /// Shown when the private `-suspend` API auto-return (kicked off from
+    /// SessionService after handling `saysomething://session`) couldn't be
+    /// confirmed — tells the user to switch back to the app they were
+    /// typing in themselves.
+    private var manualReturnBanner: some View {
+        HStack {
+            Image(systemName: "arrow.uturn.backward.circle")
+            Text("背景錄音已啟動,請切回原本輸入的 App")
+                .font(.footnote)
+            Spacer()
+            Button("好") { session.showManualReturnHint = false }
+                .font(.footnote)
+        }
+        .padding(10)
+        .background(Color.yellow.opacity(0.25))
+        .cornerRadius(8)
     }
 
     private var modePicker: some View {
@@ -215,5 +238,6 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
             .environmentObject(AppSettings())
             .environmentObject(HistoryStore())
+            .environmentObject(SessionService.shared)
     }
 }

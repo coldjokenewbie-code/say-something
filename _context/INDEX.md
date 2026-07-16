@@ -6,7 +6,7 @@
 ## 現況(2026-07-16)
 
 - 網頁版與 Android IME 已完成並運作中。
-- **iOS 版本(公務機 iPhone X / iOS 16.7.16)**:`ios/` SwiftUI App 階段 1-3+5 完成(xcodebuild 通過、ody 複驗通過),待實機驗收(需使用者接 iPhone X)與 push。
+- **iOS 版本(公務機 iPhone X / iOS 16.7.16)**:`ios/` SwiftUI App 已裝上實機;階段 6 Session 式鍵盤延伸(Wispr Flow 架構)實作完成待實機驗收與 push。
 
 ## 讀取指引
 
