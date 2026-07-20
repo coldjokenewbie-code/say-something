@@ -25,3 +25,10 @@
 
 - coach check PASS(9 條驗收);ody-verifier 首輪 FAIL(mirror 未 commit、_context 未更新)→ 修正後複驗通過。
 - 遺留風險(verifier 列,不阻擋):API key 走 URL query(與 Android 同構)、長錄音整檔進記憶體無上限、web/Android/iOS 模式清單已漂移。
+- 階段 6(鍵盤)與階段 7(whisper)契約皆複驗通過,HEAD=e4753a7;已指示使用者 Xcode Run 更新手機,實機驗收結果待回報。(2026-07-20,[Claude@Mac])
+
+## 下一步(2026-07-20 session 結束時)
+
+1. 使用者 Xcode Run 更新 iPhone X → App 內下載 small-q5_1 模型(約 190MB)→ 實測本地轉錄秒數/品質。
+2. 鍵盤流程實測:啟用鍵盤+完整取用 → session 啟動 → 任意輸入框講話直入(App Group vs pasteboard、suspend 彈回、背景存活時長)。
+3. 驗收結果回填本檔階段 4/6/7 checkbox。
