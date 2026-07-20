@@ -1,6 +1,6 @@
 # TaskLog 2026-07-16:iOS 版本(公務機)
 
-狀態:**階段 1-3+5(App 主體)、6(session 鍵盤)、7(本地 whisper 轉錄)實作完成且各自契約複驗通過;App 已裝上 iPhone X;待:階段 6/7 更新安裝與實機驗收、push**
+狀態:**階段 1-3+5(App 主體)、6(session 鍵盤)、7(本地 whisper 轉錄)實作完成且各自契約複驗通過;已 push 到 GitHub(2026-07-20,7a6e805);待:階段 4/6/7 實機驗收(使用者 Xcode Run 更新後回報)**
 
 ## 待辦
 
@@ -18,7 +18,7 @@
 - [ ] 階段 6 實機驗收:重新安裝、啟用鍵盤+Full Access、任意 App 輸入框講話→潤飾直入(App Group 免費帳號可用性、suspend 私有 API、背景 session 存活時長皆待實測)
 - [x] 階段 7 本地轉錄實作(契約 say-something-ios-whisper-20260716):whisper.cpp v1.6.2 vendor 進主 App(純 CPU/NEON,鍵盤 target 零觸碰)、WhisperTranscriber(load-per-use)、ModelManager(HF 官方 ggml 模型下載,q5_1——q5_0 該尺寸不存在已驗證 404)、GeminiClient.polishText 純文字路徑、設定可切本地/雲端
 - [ ] 階段 7 實機驗收:下載模型、實測 iPhone X 轉錄速度/記憶體(10-30 秒為估計值未實測)、背景下載完成度
-- [ ] push 到 GitHub(待使用者確認)
+- [x] push 到 GitHub(2026-07-20,session-end 授權;main c02ac33→7a6e805,含 ios/ 全部、_context、rules 白名單)
 - [ ] (選配)AppIcon 實際圖示;三端模式同步(web 已有第 8 模式「簡潔」,Android/iOS 停在 7 模式)
 
 ## 複驗紀錄(2026-07-16,[Claude@Mac])

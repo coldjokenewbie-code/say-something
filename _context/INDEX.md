@@ -6,7 +6,7 @@
 ## 現況(2026-07-16)
 
 - 網頁版與 Android IME 已完成並運作中。
-- **iOS 版本(公務機 iPhone X / iOS 16.7.16)**:`ios/` SwiftUI App 已裝上實機;階段 6 Session 式鍵盤延伸(Wispr Flow 架構)與階段 7 本地 whisper 轉錄(聲音不出手機,純文字送 Gemini 潤飾,可切雲端)實作完成,待更新安裝與實機驗收、push。
+- **iOS 版本(公務機 iPhone X / iOS 16.7.16)**:`ios/` SwiftUI App 已裝上實機;階段 6 Session 式鍵盤延伸(Wispr Flow 架構)與階段 7 本地 whisper 轉錄(聲音不出手機,純文字送 Gemini 潤飾,可切雲端)實作完成並已 push(2026-07-20);待更新安裝與實機驗收(下載模型、轉錄速度、鍵盤流程)。
 
 ## 讀取指引
 
